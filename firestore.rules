@@ -1,0 +1,197 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: users
+    // Document ID: {uid}
+    // Fields:
+    //   - uid: string (required)
+    //   - displayName: string
+    //   - email: string (required)
+    //   - photoURL: string
+    //   - createdAt: timestamp
+    //
+    // Collection: recipes
+    // Document ID: {recipeId}
+    // Fields:
+    //   - title: string (required, 1-100 chars)
+    //   - description: string (0-500 chars)
+    //   - ingredients: list (required, strings)
+    //   - instructions: list (required, strings)
+    //   - category: string (required)
+    //   - tags: list (strings)
+    //   - authorId: string (required, immutable)
+    //   - authorName: string
+    //   - isPublic: bool (required)
+    //   - imageUrl: string
+    //   - likedBy: list (strings, uids)
+    //   - likesCount: int
+    //   - averageRating: number
+    //   - totalRatings: int
+    //   - createdAt: timestamp
+    //   - updatedAt: timestamp
+    //
+    // Collection: comments (subcollection of recipes)
+    // Document ID: {commentId}
+    // Fields:
+    //   - text: string (required, 1-500 chars)
+    //   - authorId: string (required, immutable)
+    //   - authorName: string (required)
+    //   - authorPhoto: string
+    //   - createdAt: timestamp
+    //
+    // Collection: ratings (subcollection of recipes)
+    // Document ID: {userId}
+    // Fields:
+    //   - rating: int (1-5)
+    //
+    // Collection: categories
+    // Document ID: {categoryId}
+    // Fields:
+    //   - name: string
+    //   - slug: string
+    //
+    // ===============================================================
+
+    // Helper Functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isDocOwner() {
+      return isAuthenticated() && request.auth.uid == resource.data.authorId;
+    }
+
+    function isValidEmail(email) {
+      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    function isValidUrl(url) {
+      return url is string && (url.matches("^https://.*") || url.matches("^http://.*"));
+    }
+
+    // Domain Validators
+    function isValidUser(data) {
+      return data.keys().hasAll(['uid', 'email']) &&
+             data.uid == request.auth.uid &&
+             isValidEmail(data.email);
+    }
+
+    function isValidRecipe(data) {
+      return data.keys().hasAll(['title', 'ingredients', 'instructions', 'authorId', 'isPublic']) &&
+             data.title is string && data.title.size() > 0 && data.title.size() <= 100 &&
+             data.ingredients is list &&
+             data.instructions is list &&
+             data.authorId == request.auth.uid &&
+             data.isPublic is bool &&
+             (!('likedBy' in data) || data.likedBy is list) &&
+             (!('likesCount' in data) || data.likesCount is int);
+    }
+
+    function isValidComment(data) {
+      return data.keys().hasAll(['text', 'authorId', 'authorName', 'createdAt']) &&
+             data.text is string && data.text.size() > 0 && data.text.size() <= 500 &&
+             data.authorId == request.auth.uid &&
+             data.authorName is string &&
+             data.createdAt is timestamp;
+    }
+
+    function isValidRating(data) {
+      return data.keys().hasAll(['rating']) &&
+             data.rating is int && data.rating >= 1 && data.rating <= 5;
+    }
+
+    // Rules
+    match /users/{userId} {
+      allow read: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidUser(request.resource.data);
+      allow update: if isOwner(userId) && isValidUser(request.resource.data);
+    }
+
+    match /recipes/{recipeId} {
+      allow read: if resource.data.isPublic == true || isDocOwner();
+      allow create: if isAuthenticated() && isValidRecipe(request.resource.data);
+      allow update: if (isDocOwner() && isValidRecipe(request.resource.data)) || 
+                      (isAuthenticated() && 
+                       (
+                         (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likedBy', 'likesCount', 'updatedAt']) &&
+                          (
+                            // Liking: adding own UID
+                            (request.resource.data.likedBy.size() == resource.data.likedBy.size() + 1 &&
+                             request.resource.data.likedBy.hasAll(resource.data.likedBy) &&
+                             request.auth.uid in request.resource.data.likedBy &&
+                             request.resource.data.likesCount == resource.data.likesCount + 1) ||
+                            // Unliking: removing own UID
+                            (request.resource.data.likedBy.size() == resource.data.likedBy.size() - 1 &&
+                             resource.data.likedBy.hasAll(request.resource.data.likedBy) &&
+                             !(request.auth.uid in request.resource.data.likedBy) &&
+                             request.resource.data.likesCount == resource.data.likesCount - 1)
+                          )) ||
+                         (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['averageRating', 'totalRatings', 'updatedAt']) &&
+                          request.resource.data.averageRating >= 1 && request.resource.data.averageRating <= 5 &&
+                          (request.resource.data.totalRatings == resource.data.totalRatings + 1 || 
+                           request.resource.data.totalRatings == resource.data.totalRatings) // Allow updating average without changing total if needed
+                         )
+                       ));
+      allow delete: if isDocOwner();
+
+      match /comments/{commentId} {
+        allow read: if true;
+        allow create: if isAuthenticated() && isValidComment(request.resource.data);
+        allow update: if isAuthenticated() && request.auth.uid == resource.data.authorId && isValidComment(request.resource.data);
+        allow delete: if isAuthenticated() && (request.auth.uid == resource.data.authorId || get(/databases/$(database)/documents/recipes/$(recipeId)).data.authorId == request.auth.uid);
+      }
+
+      match /ratings/{userId} {
+        allow read: if true;
+        allow create: if isOwner(userId) && isValidRating(request.resource.data);
+        allow update: if isOwner(userId) && isValidRating(request.resource.data);
+      }
+    }
+
+    match /ai_discover_recipes/{recipeId} {
+      allow read: if true;
+      allow create: if true;
+      allow update: if isAuthenticated() && 
+                    (
+                      (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likedBy', 'likesCount', 'updatedAt']) &&
+                       (
+                         // Liking: adding own UID
+                         (request.resource.data.likedBy.size() == resource.data.likedBy.size() + 1 &&
+                          request.resource.data.likedBy.hasAll(resource.data.likedBy) &&
+                          request.auth.uid in request.resource.data.likedBy &&
+                          request.resource.data.likesCount == resource.data.likesCount + 1) ||
+                         // Unliking: removing own UID
+                         (request.resource.data.likedBy.size() == resource.data.likedBy.size() - 1 &&
+                          resource.data.likedBy.hasAll(request.resource.data.likedBy) &&
+                          !(request.auth.uid in request.resource.data.likedBy) &&
+                          request.resource.data.likesCount == resource.data.likesCount - 1)
+                       )) ||
+                      (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['averageRating', 'totalRatings', 'updatedAt']) &&
+                       request.resource.data.averageRating >= 1 && request.resource.data.averageRating <= 5 &&
+                       (request.resource.data.totalRatings == resource.data.totalRatings + 1 ||
+                        request.resource.data.totalRatings == resource.data.totalRatings)
+                      )
+                    );
+      allow delete: if false;
+
+      match /ratings/{userId} {
+        allow read: if true;
+        allow create: if isOwner(userId) && isValidRating(request.resource.data);
+        allow update: if isOwner(userId) && isValidRating(request.resource.data);
+      }
+    }
+
+    match /categories/{categoryId} {
+      allow read: if true;
+      allow write: if false; // Read-only for users
+    }
+  }
+}

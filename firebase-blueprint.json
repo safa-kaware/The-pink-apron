@@ -1,0 +1,106 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile information",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "displayName": { "type": "string" },
+        "email": { "type": "string" },
+        "photoURL": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email"]
+    },
+    "Recipe": {
+      "title": "Recipe",
+      "description": "A cooking recipe",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "ingredients": { "type": "array", "items": { "type": "string" } },
+        "instructions": { "type": "array", "items": { "type": "string" } },
+        "category": { "type": "string" },
+        "tags": { "type": "array", "items": { "type": "string" } },
+        "authorId": { "type": "string" },
+        "authorName": { "type": "string" },
+        "isPublic": { "type": "boolean" },
+        "imageUrl": { "type": "string" },
+        "likedBy": { "type": "array", "items": { "type": "string" } },
+        "likesCount": { "type": "integer" },
+        "averageRating": { "type": "number", "description": "Average star rating (1-5)" },
+        "totalRatings": { "type": "integer", "description": "Total number of ratings received" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["title", "ingredients", "instructions", "authorId"]
+    },
+    "Comment": {
+      "title": "Comment",
+      "description": "A comment on a recipe",
+      "type": "object",
+      "properties": {
+        "text": { "type": "string" },
+        "authorId": { "type": "string" },
+        "authorName": { "type": "string" },
+        "authorPhoto": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["text", "authorId", "authorName"]
+    },
+    "Category": {
+      "title": "Category",
+      "description": "Recipe category",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "slug": { "type": "string" }
+      },
+      "required": ["name", "slug"]
+    }
+  },
+  "firestore": {
+    "/users/{uid}": {
+      "schema": "User",
+      "description": "Private user profiles"
+    },
+    "/recipes/{recipeId}": {
+      "schema": "Recipe",
+      "description": "Collection of all recipes"
+    },
+    "/recipes/{recipeId}/comments/{commentId}": {
+      "schema": "Comment",
+      "description": "Comments on a specific recipe"
+    },
+    "/recipes/{recipeId}/ratings/{userId}": {
+      "schema": {
+        "type": "object",
+        "properties": {
+          "rating": { "type": "integer", "minimum": 1, "maximum": 5 }
+        },
+        "required": ["rating"]
+      },
+      "description": "Individual user ratings for a recipe"
+    },
+    "/ai_discover_recipes/{recipeId}": {
+      "schema": "Recipe",
+      "description": "Collection of all daily AI-generated discover recipes"
+    },
+    "/ai_discover_recipes/{recipeId}/ratings/{userId}": {
+      "schema": {
+        "type": "object",
+        "properties": {
+          "rating": { "type": "integer", "minimum": 1, "maximum": 5 }
+        },
+        "required": ["rating"]
+      },
+      "description": "Individual user ratings for AI discover recipes"
+    },
+    "/categories/{categoryId}": {
+      "schema": "Category",
+      "description": "Fixed list of categories"
+    }
+  }
+}
